@@ -1,0 +1,4 @@
+.git/
+Dockerfile
+kured-toujours
+dist/
