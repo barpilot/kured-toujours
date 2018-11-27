@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kured-toujours
+  namespace: kube-system
+  labels:
+    k8s-app: kured-toujours
+spec:
+  selector:
+    matchLabels:
+      name: kured-toujours
+  template:
+    metadata:
+      labels:
+        name: kured-toujours
+    spec:
+      containers:
+      - name: kured-toujours
+        image: barpilot/kured-toujours:0.0.1
+        args: ["--period", "168h"]
+        resources:
+          limits:
+            memory: 20Mi
+          requests:
+            cpu: 10m
+            memory: 5Mi
+        volumeMounts:
+        - name: run
+          mountPath: /var/run
+      volumes:
+      - name: run
+        hostPath:
+          path: /var/run
