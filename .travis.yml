@@ -4,10 +4,7 @@ env:
   - PATH=/snap/bin:$PATH
   global:
     secure: S39wK+2gNXCNsQ4JYCicsdvn5PVCW6QP6n52DOV+37YiH/7Q7kDtf3gv2OicNKYICCX671Ujmt1XY4Q/+EwxTiaM1latwPc9Wv7E5J4Ef0iSmQagqAB/jREeMHdXGgXWvCKU+Dm3P2aXo1kF5tmXFf4fBVhQDeBaZNoHOMYRvstM/jSPmkOP2aqZJH/eQLI1C+YYu+gTkOzT+YCucVDOMeauCouhB+55uTZjbG6Phb8JlMVFbUY7IJsqq8VEb++NS5ALRxDmjHGTUCzZygCwGnId9CesLgYc+YL0uIVF6ZWgVI7PdeBvU0Pp/P7PdE6hNtjattxMMdUqLvOq0MjaDSnsEzAR9ZJ1LPMSEzzMzH/UC5/fL5T1NbTpkoTZckAEQAZnwWMFPcvCR+vL3VLsabExDJP4pBNPLFaNz5MzgBHVeTKaVFk/r9Z6lQo29fpaS5UzTZwY/p7soq/ocxgbLquP0gQSVwqAraE3XTqZhO6q0OKf8mxb2GFbChEeXO56k4OhTUuUo0ySfSiYnzMH/wx0+VU5e5iNEMYva2Hh51lHWakr1Ds/MP4tNCuARsJOgwZp6PtzD7qaep3S4HJAIE1wsPhKv4+7/mwOIqDwQSfldzpKNlmRpa0DcuasaB/09Rsl9LX1QHjWu+PrxAwc7/XY8XE8i03PTDkDkUHs4Ks=
-services:
-- docker
-after_success:
-- test -n "$TRAVIS_TAG" && docker login -u=myuser -p="$DOCKER_PASSWORD"
+
 deploy:
 - provider: script
   skip_cleanup: true
