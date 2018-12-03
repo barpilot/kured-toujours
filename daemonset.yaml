@@ -17,7 +17,7 @@ spec:
       hostPID: true # Facilitate entering the host mount namespace via init
       containers:
       - name: kured-toujours
-        image: barpilot/kured-toujours:0.0.1
+        image: barpilot/kured-toujours:0.0.2
         args: ["--period", "168h"]
         securityContext:
           privileged: true # Give permission to nsenter /proc/1/ns/mnt
