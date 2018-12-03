@@ -19,6 +19,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/capnm/sysinfo"
@@ -115,10 +116,30 @@ func root(cmd *cobra.Command, args []string) {
 
 	tick := delaytick.New(source, delay)
 	for range tick {
-		_, err := os.OpenFile(rebootSentinel, os.O_RDONLY|os.O_CREATE, 0666)
-		if err != nil {
-			log.Fatal(err)
+		if touchSentinel() {
+			log.Printf("File %s touched", rebootSentinel)
+		} else {
+			log.Printf("Error when touching %s", rebootSentinel)
 		}
-		log.Printf("File %s touched", rebootSentinel)
 	}
+}
+
+func touchSentinel() bool {
+	// Relies on hostPID:true and privileged:true to enter host mount space
+	sentinelCmd := exec.Command("/usr/bin/nsenter", "-m/proc/1/ns/mnt", "--", "/usr/bin/touch", rebootSentinel)
+	if err := sentinelCmd.Run(); err != nil {
+		switch err := err.(type) {
+		case *exec.ExitError:
+			// We assume a non-zero exit code means 'reboot not required', but of course
+			// the user could have misconfigured the sentinel command or something else
+			// went wrong during its execution. In that case, not entering a reboot loop
+			// is the right thing to do, and we are logging stdout/stderr of the command
+			// so it should be obvious what is wrong.
+			return false
+		default:
+			// Something was grossly misconfigured, such as the command path being wrong.
+			log.Fatalf("Error invoking sentinel command: %v", err)
+		}
+	}
+	return true
 }

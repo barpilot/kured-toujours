@@ -14,20 +14,16 @@ spec:
       labels:
         name: kured-toujours
     spec:
+      hostPID: true # Facilitate entering the host mount namespace via init
       containers:
       - name: kured-toujours
         image: barpilot/kured-toujours:0.0.1
         args: ["--period", "168h"]
+        securityContext:
+          privileged: true # Give permission to nsenter /proc/1/ns/mnt
         resources:
           limits:
             memory: 20Mi
           requests:
             cpu: 10m
             memory: 5Mi
-        volumeMounts:
-        - name: run
-          mountPath: /var/run
-      volumes:
-      - name: run
-        hostPath:
-          path: /var/run
