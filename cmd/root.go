@@ -15,35 +15,26 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
-	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 	"time"
 
-	"github.com/capnm/sysinfo"
-
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
-
-	"github.com/weaveworks/kured/pkg/delaytick"
 )
 
-var cfgFile string
-
-// rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "kured-toujours",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	Run: root,
+	Use:           "kured-toujours",
+	Short:         "Mark a node for reboot after a configured uptime",
+	Long:          "Create a reboot sentinel after the uptime threshold. A separate reboot controller such as kured must consume it.",
+	Args:          cobra.NoArgs,
+	RunE:          root,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 var (
@@ -51,95 +42,77 @@ var (
 	rebootSentinel string
 )
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.kured-toujours.yaml)")
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-
-	rootCmd.PersistentFlags().DurationVar(&period, "period", time.Minute*60,
-		"reboot check period")
-	rootCmd.PersistentFlags().StringVar(&rebootSentinel, "reboot-sentinel", "/var/run/reboot-required",
-		"path to file whose existence signals need to reboot")
-
+	rootCmd.Flags().DurationVar(&period, "period", time.Hour, "minimum node uptime before requesting a reboot")
+	rootCmd.Flags().StringVar(&rebootSentinel, "reboot-sentinel", "/var/run/reboot-required", "absolute path to the reboot sentinel in this filesystem")
 }
 
-// initConfig reads in config file and ENV variables if set.
-func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := homedir.Dir()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		// Search config in home directory with name ".kured-toujours" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigName(".kured-toujours")
+func root(cmd *cobra.Command, _ []string) error {
+	if period <= 0 {
+		return fmt.Errorf("period must be positive")
 	}
-
-	viper.AutomaticEnv() // read in environment variables that match
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
+	if !filepath.IsAbs(rebootSentinel) {
+		return fmt.Errorf("reboot-sentinel must be an absolute path")
 	}
+	var info syscall.Sysinfo_t
+	if err := syscall.Sysinfo(&info); err != nil {
+		return fmt.Errorf("read uptime: %w", err)
+	}
+	return run(cmd.Context(), period, rebootSentinel, time.Duration(info.Uptime)*time.Second)
 }
 
-func root(cmd *cobra.Command, args []string) {
-
-	source := rand.NewSource(time.Now().UnixNano())
-
-	si := sysinfo.Get()
-
-	uptime := time.Duration(si.Uptime)
-
-	delay := period - uptime
-
-	if delay < 0 {
-		delay = period
+func initialDelay(period, uptime time.Duration) time.Duration {
+	if uptime >= period {
+		return 0
 	}
+	return period - uptime
+}
 
-	log.Printf("Ask for reboot in %s", delay.String())
-
-	tick := delaytick.New(source, delay)
-	for range tick {
-		if touchSentinel() {
-			log.Printf("File %s touched", rebootSentinel)
-		} else {
-			log.Printf("Error when touching %s", rebootSentinel)
+func run(ctx context.Context, period time.Duration, sentinel string, uptime time.Duration) error {
+	delay := initialDelay(period, uptime)
+	log.Printf("Request reboot in %s using %s", delay, sentinel)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timer.C:
+			if ctx.Err() != nil {
+				return nil
+			}
+			if err := touchSentinel(sentinel); err != nil {
+				return fmt.Errorf("create sentinel %s: %w", sentinel, err)
+			}
+			log.Printf("Reboot sentinel present: %s", sentinel)
+			timer.Reset(period)
 		}
 	}
 }
 
-func touchSentinel() bool {
-	// Relies on hostPID:true and privileged:true to enter host mount space
-	sentinelCmd := exec.Command("/usr/bin/nsenter", "-m/proc/1/ns/mnt", "--", "/usr/bin/touch", rebootSentinel)
-	if err := sentinelCmd.Run(); err != nil {
-		switch err := err.(type) {
-		case *exec.ExitError:
-			// We assume a non-zero exit code means 'reboot not required', but of course
-			// the user could have misconfigured the sentinel command or something else
-			// went wrong during its execution. In that case, not entering a reboot loop
-			// is the right thing to do, and we are logging stdout/stderr of the command
-			// so it should be obvious what is wrong.
-			return false
-		default:
-			// Something was grossly misconfigured, such as the command path being wrong.
-			log.Fatalf("Error invoking sentinel command: %v", err)
-		}
+func touchSentinel(path string) error {
+	// Do not follow a final symlink, truncate existing contents, or block on a FIFO.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0644)
+	if err != nil {
+		return err
 	}
-	return true
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return fmt.Errorf("sentinel must be a regular file")
+	}
+	return f.Close()
 }

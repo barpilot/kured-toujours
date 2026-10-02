@@ -1,9 +1,10 @@
 module github.com/barpilot/kured-toujours
 
+go 1.27.1
+
+require github.com/spf13/cobra v1.10.2
+
 require (
-	github.com/capnm/sysinfo v0.0.0-20130621111458-5909a53897f3
-	github.com/mitchellh/go-homedir v1.0.0
-	github.com/spf13/cobra v0.0.3
-	github.com/spf13/viper v1.2.1
-	github.com/weaveworks/kured v0.0.0-20181030170654-114c34950b15
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 )
