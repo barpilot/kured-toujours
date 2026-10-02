@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go mod verify
+      - run: go mod tidy -diff
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: CGO_ENABLED=0 go build -mod=readonly -trimpath .
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.18.2
+          args: release --snapshot --clean --skip=publish
+      - name: Build and verify container with a temporary sentinel
+        run: |
+          docker build -t kured-toujours:test .
+          sentinel_dir=$(mktemp -d)
+          container_id=""
+          trap 'if [ -n "$container_id" ]; then docker rm -f "$container_id"; fi; rm -rf "$sentinel_dir"' EXIT
+          container_id=$(docker run -d --user "$(id -u):$(id -g)" --read-only --cap-drop=ALL --security-opt=no-new-privileges -v "$sentinel_dir:/sentinel" kured-toujours:test --period 1s --reboot-sentinel /sentinel/reboot-required)
+          for attempt in $(seq 1 50); do
+            if [ -f "$sentinel_dir/reboot-required" ]; then break; fi
+            sleep 0.1
+          done
+          docker logs "$container_id"
+          test -f "$sentinel_dir/reboot-required"
+          docker stop --time 5 "$container_id"
+          test "$(docker inspect -f '{{.State.ExitCode}}' "$container_id")" = 0
